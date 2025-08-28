@@ -1,0 +1,28 @@
+{
+    "elements": [
+        {"type": "text", "content": "Welcome to Byte Burgers\n", "style": {"bold": true, "size": "LARGE"}},
+        {"type": "text", "content": "123 Tech Ave\n"},
+        {"type": "text", "content": "Silicon Valley, CA 94000\n"},
+        {"type": "divider"},
+        {"type": "dynamic", "field": "{timestamp}"},
+        {"type": "feed", "lines": 1},
+        {"type": "text", "content": "Order #: "},
+        {"type": "dynamic", "field": "{order_number}"},
+        {"type": "feed", "lines": 2},
+        {"type": "dynamic", "field": "{item_list}"},
+        {"type": "feed", "lines": 1},
+        {"type": "divider"},
+        {"type": "text", "content": "Subtotal: "},
+        {"type": "dynamic", "field": "{subtotal}"},
+        {"type": "feed", "lines": 1},
+        {"type": "text", "content": "Tax: "},
+        {"type": "dynamic", "field": "{tax}"},
+        {"type": "feed", "lines": 1},
+        {"type": "text", "content": "Total: ", "style": {"bold": true}},
+        {"type": "dynamic", "field": "{total}"},
+        {"type": "feed", "lines": 2},
+        {"type": "barcode", "data": "123456789", "barcodeType": "CODE39"},
+        {"type": "feed", "lines": 2},
+        {"type": "text", "content": "Thank you for your visit!\n", "style": {"size": "SMALL"}}
+    ]
+}
