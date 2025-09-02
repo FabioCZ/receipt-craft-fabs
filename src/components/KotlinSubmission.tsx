@@ -30,99 +30,314 @@ export const KotlinSubmission: React.FC<KotlinSubmissionProps> = ({
   onSubmissionSuccess
 }) => {
   const [teamName, setTeamName] = useState('');
-  const [kotlinCode, setKotlinCode] = useState(`fun interpret(jsonString: String, printer: EpsonPrinter, order: Order?) {
+  const [kotlinCode, setKotlinCode] = useState(`
+
+fun interpret(jsonString: String, printer: EpsonPrinter, order: Order?) {
     try {
-        // Parse the JSON design
-        val json = JSONObject(jsonString)
+        val jsonObject = JSONObject(jsonString)
+        val elements = jsonObject.getJSONArray("elements")
         
-        // Helper function to replace template variables with actual order data
-        fun replaceTemplateVars(text: String): String {
-            var result = text
-            if (order != null) {
-                result = result.replace("{{STORE_NAME}}", order.storeName)
-                result = result.replace("{{STORE_NUMBER}}", order.storeNumber)
-                result = result.replace("{{ORDER_ID}}", order.orderId)
-            }
-            return result
-        }
-        
-        // Process each element in the JSON
-        if (json.has("elements")) {
-            val elements = json.getJSONArray("elements")
+        for (i in 0 until elements.length()) {
+            val element = elements.getJSONObject(i)
+            val type = element.getString("type")
             
-            for (i in 0 until elements.length()) {
-                val element = elements.getJSONObject(i)
-                val type = element.getString("type")
+            when (type) {
+                "text" -> {
+                    val content = element.optString("content", "")
+                    val processed = processTemplateVariables(content, order)
+                    
+                    if (element.has("style")) {
+                        val style = element.getJSONObject("style")
+                        val bold = style.optBoolean("bold", false)
+                        val underline = style.optBoolean("underline", false)
+                        val sizeStr = style.optString("size", "NORMAL")
+                        val textSize = when (sizeStr) {
+                            "SMALL" -> TextSize.SMALL
+                            "LARGE" -> TextSize.LARGE
+                            "XLARGE" -> TextSize.XLARGE
+                            else -> TextSize.NORMAL
+                        }
+                        printer.addText(processed, TextStyle(bold = bold, size = textSize, underline = underline))
+                    } else {
+                        printer.addText(processed)
+                    }
+                }
+                "align" -> {
+                    val alignmentStr = element.optString("alignment", "LEFT")
+                    val alignment = when (alignmentStr) {
+                        "CENTER" -> Alignment.CENTER
+                        "RIGHT" -> Alignment.RIGHT
+                        else -> Alignment.LEFT
+                    }
+                    printer.addTextAlign(alignment)
+                }
+                "feedLine" -> {
+                    val lines = element.optInt("lines", 1)
+                    printer.addFeedLine(lines)
+                }
+                "barcode" -> {
+                    val data = element.optString("data", "")
+                    val typeStr = element.optString("barcodeType", "CODE128")
+                    val barcodeType = BarcodeType.valueOf(typeStr)
+                    printer.addBarcode(data, barcodeType, null)
+                }
+                "qrcode" -> {
+                    val data = element.optString("data", "")
+                    val processed = processTemplateVariables(data, order)
+                    val size = element.optInt("qrSize", 3)
+                    printer.addQRCode(processed, QRCodeOptions(size = size))
+                }
+                "divider" -> {
+                    val content = element.optString("content", "================================")
+                    printer.addTextAlign(Alignment.CENTER)
+                    printer.addText(content)
+                }
+                "dynamic" -> {
+                    val field = element.optString("field", "")
+                    val value = getDynamicValue(field, order)
+                    printer.addText(value)
+                }
+                "items_list" -> {
+                    if (order != null) {
+                        val template = element.optString("itemTemplate", "")
+                        val showSku = element.optBoolean("showSku", false)
+                        val showCategory = element.optBoolean("showCategory", false)
+                        val showModifiers = element.optBoolean("showModifiers", false)
+                        val showUnitPrice = element.optBoolean("showUnitPrice", false)
+                        printItems(printer, order, template, showSku, showCategory, showModifiers, showUnitPrice)
+                    }
+                }
                 
-                when (type) {
-                    "text" -> {
-                        // Get content and replace template variables
-                        val content = replaceTemplateVars(element.optString("content", ""))
-                        
-                        // Check if there's a style object
-                        if (element.has("style")) {
-                            val style = element.getJSONObject("style")
-                            val textStyle = TextStyle(
-                                bold = style.optBoolean("bold", false),
-                                underline = style.optBoolean("underline", false),
-                                size = when (style.optString("size", "NORMAL")) {
-                                    "SMALL" -> TextSize.SMALL
-                                    "LARGE" -> TextSize.LARGE
-                                    "XLARGE" -> TextSize.XLARGE
-                                    else -> TextSize.NORMAL
-                                }
-                            )
-                            printer.addText(content, textStyle)
-                        } else {
-                            printer.addText(content)
-                        }
-                    }
-                    
-                    "items_list" -> {
-                        // Print items from the order
-                        if (order != null) {
-                            for (i in 0 until order.items.size) {
-                                val item = order.items[i]
-                                printer.addText("• " + item.name)
-                            }
-                        } else {
-                            printer.addText("(No items)")
-                        }
-                    }
-                    
-                    "align" -> {
-                        // Set text alignment
-                        val alignmentStr = element.optString("alignment", "LEFT")
-                        val alignment = when (alignmentStr) {
-                            "CENTER" -> Alignment.CENTER
-                            "RIGHT" -> Alignment.RIGHT
-                            else -> Alignment.LEFT
-                        }
-                        printer.addTextAlign(alignment)
-                    }
-                    
-                    "feedLine" -> {
-                        // Add blank lines
-                        val lines = element.optInt("lines", 1)
-                        printer.addFeedLine(lines)
-                    }
-                    
-                    "cutPaper" -> {
-                        // Cut the paper
-                        printer.cutPaper()
-                    }
-                    
-                    else -> {
-                        // Skip unknown types silently
-                    }
+                "cutPaper" -> {
+                    printer.cutPaper()
                 }
             }
         }
     } catch (e: Exception) {
-        // If there's any error, print it to the receipt for debugging
-        printer.addText("Error in interpreter: " + e.message)
+        printer.addText("Error occurred", TextStyle(bold = true))
+        printer.addFeedLine(1)
+        printer.cutPaper()
     }
-}`);
+}
+
+fun processTemplateVariables(content: String, order: Order?): String {
+    var result = content
+    if (order != null) {
+        // Basic order fields
+        result = result.replace("{{STORE_NAME}}", order.storeName)
+        result = result.replace("{{STORE_NUMBER}}", order.storeNumber)
+        result = result.replace("{{ORDER_ID}}", order.orderId)
+        result = result.replace("{{TIMESTAMP}}", java.text.SimpleDateFormat("MM/dd/yyyy HH:mm").format(java.util.Date(order.timestamp)))
+        result = result.replace("{{SUBTOTAL}}", String.format("$%.2f", order.subtotal))
+        result = result.replace("{{TAX_RATE}}", String.format("%.1f%%", order.taxRate * 100))
+        result = result.replace("{{TAX}}", String.format("$%.2f", order.taxAmount))
+        result = result.replace("{{TOTAL}}", String.format("$%.2f", order.totalAmount))
+        result = result.replace("{{PAYMENT_METHOD}}", order.paymentMethod ?: "Cash")
+        
+        // Customer info fields
+        order.customerInfo?.let { customer ->
+            result = result.replace("{{CUSTOMER_ID}}", customer.customerId)
+            result = result.replace("{{CUSTOMER_NAME}}", customer.name)
+            result = result.replace("{{MEMBER_STATUS}}", customer.memberStatus ?: "Regular")
+            result = result.replace("{{LOYALTY_POINTS}}", customer.loyaltyPoints.toString())
+            result = result.replace("{{MEMBER_SINCE}}", customer.memberSince ?: "N/A")
+        }
+        
+        // Table info fields
+        order.tableInfo?.let { table ->
+            result = result.replace("{{TABLE_NUMBER}}", table.tableNumber)
+            result = result.replace("{{SERVER_NAME}}", table.serverName)
+            result = result.replace("{{GUEST_COUNT}}", table.guestCount.toString())
+            result = result.replace("{{SERVICE_RATING}}", table.serviceRating?.toString() ?: "N/A")
+        }
+        
+        // Item count
+        result = result.replace("{{ITEM_COUNT}}", order.items.size.toString())
+        result = result.replace("{{TOTAL_QUANTITY}}", order.items.sumOf { it.quantity }.toString())
+    }
+    return result
+}
+
+fun getDynamicValue(field: String, order: Order?): String {
+    return when (field) {
+        // Basic order fields
+        "STORE_NAME" -> order?.storeName ?: "Store Name"
+        "STORE_NUMBER" -> order?.storeNumber ?: "001"
+        "ORDER_ID" -> order?.orderId ?: "ORD123456"
+        "TIMESTAMP" -> order?.let { 
+            java.text.SimpleDateFormat("MM/dd/yyyy HH:mm").format(java.util.Date(it.timestamp))
+        } ?: java.text.SimpleDateFormat("MM/dd/yyyy HH:mm").format(java.util.Date())
+        "SUBTOTAL" -> if (order != null) String.format("$%.2f", order.subtotal) else "$0.00"
+        "TAX_RATE" -> if (order != null) String.format("%.1f%%", order.taxRate * 100) else "0.0%"
+        "TAX" -> if (order != null) String.format("$%.2f", order.taxAmount) else "$0.00"
+        "TOTAL" -> if (order != null) String.format("$%.2f", order.totalAmount) else "$0.00"
+        "PAYMENT_METHOD" -> order?.paymentMethod ?: "Cash"
+        "ITEM_COUNT" -> order?.items?.size?.toString() ?: "0"
+        "TOTAL_QUANTITY" -> order?.items?.sumOf { it.quantity }?.toString() ?: "0"
+        
+        // Customer info fields
+        "CUSTOMER_ID" -> order?.customerInfo?.customerId ?: "GUEST001"
+        "CUSTOMER_NAME" -> order?.customerInfo?.name ?: "Guest"
+        "MEMBER_STATUS" -> order?.customerInfo?.memberStatus ?: "Regular"
+        "LOYALTY_POINTS" -> order?.customerInfo?.loyaltyPoints?.toString() ?: "0"
+        "MEMBER_SINCE" -> order?.customerInfo?.memberSince ?: "N/A"
+        
+        // Table info fields
+        "TABLE_NUMBER" -> order?.tableInfo?.tableNumber ?: "N/A"
+        "SERVER_NAME" -> order?.tableInfo?.serverName ?: "Server"
+        "GUEST_COUNT" -> order?.tableInfo?.guestCount?.toString() ?: "1"
+        "SERVICE_RATING" -> order?.tableInfo?.serviceRating?.toString() ?: "N/A"
+        
+        // Default fallback
+        "CASHIER_NAME" -> "Cashier"
+        else -> field
+    }
+}
+
+fun printItems(printer: EpsonPrinter, order: Order, template: String = "", showSku: Boolean = false, showCategory: Boolean = false, showModifiers: Boolean = false, showUnitPrice: Boolean = false) {
+    for (item in order.items) {
+        if (template.isNotEmpty()) {
+            // Process the custom template with alignment directives
+            var processedTemplate = template
+            
+            // Replace variables first
+            processedTemplate = processedTemplate.replace("{{name}}", item.name)
+            processedTemplate = processedTemplate.replace("{{quantity}}", item.quantity.toString())
+            processedTemplate = processedTemplate.replace("{{unitPrice}}", String.format("%.2f", item.unitPrice))
+            processedTemplate = processedTemplate.replace("{{totalPrice}}", String.format("%.2f", item.totalPrice))
+            processedTemplate = processedTemplate.replace("{{sku}}", item.sku ?: "")
+            processedTemplate = processedTemplate.replace("{{category}}", item.category ?: "")
+            processedTemplate = processedTemplate.replace("{{modifiers}}", if (item.modifiers.isNotEmpty()) item.modifiers.joinToString(", ") else "")
+            
+            // Process alignment directives and print content
+            processTemplateWithAlignment(printer, processedTemplate)
+        } else {
+            // Default fallback when no template is provided
+            val line = if (item.quantity > 1) item.quantity.toString() + "x " + item.name else item.name
+            printer.addText(line)
+            printer.addTextAlign(Alignment.RIGHT)
+            printer.addText(String.format("$%.2f", item.totalPrice))
+            printer.addTextAlign(Alignment.LEFT)
+        }
+        
+        // Show optional details based on configuration
+        if (showSku && item.sku != null) {
+            printer.addText("  SKU: " + item.sku, TextStyle(size = TextSize.SMALL))
+        }
+        
+        if (showCategory && item.category != null) {
+            printer.addText("  Category: " + item.category, TextStyle(size = TextSize.SMALL))
+        }
+        
+        if (showModifiers && item.modifiers.isNotEmpty()) {
+            for (modifier in item.modifiers) {
+                printer.addText("  + " + modifier, TextStyle(size = TextSize.SMALL))
+            }
+        }
+        
+        if (showUnitPrice && item.quantity > 1) {
+            printer.addTextAlign(Alignment.RIGHT)
+            printer.addText(String.format("$%.2f ea", item.unitPrice), TextStyle(size = TextSize.SMALL))
+            printer.addTextAlign(Alignment.LEFT)
+        }
+        
+        printer.addFeedLine(1)
+    }
+    
+    // Print promotions if any
+    if (order.itemPromotions.isNotEmpty()) {
+        printer.addFeedLine(1)
+        printer.addText("ITEM DISCOUNTS:", TextStyle(bold = true))
+        for (promo in order.itemPromotions) {
+            printer.addText(promo.promotionName)
+            printer.addTextAlign(Alignment.RIGHT)
+            printer.addText("-" + String.format("$%.2f", promo.discountAmount))
+            printer.addTextAlign(Alignment.LEFT)
+        }
+        printer.addFeedLine(1)
+    }
+    
+    if (order.orderPromotions.isNotEmpty()) {
+        printer.addText("ORDER DISCOUNTS:", TextStyle(bold = true))
+        for (promo in order.orderPromotions) {
+            val discountText = if (promo.promotionType == "PERCENTAGE") {
+                promo.promotionName + " (" + String.format("%.1f%%", promo.discountAmount) + ")"
+            } else {
+                promo.promotionName
+            }
+            printer.addText(discountText)
+            printer.addTextAlign(Alignment.RIGHT)
+            printer.addText("-" + String.format("$%.2f", promo.discountAmount))
+            printer.addTextAlign(Alignment.LEFT)
+        }
+        printer.addFeedLine(1)
+    }
+}
+
+fun processTemplateWithAlignment(printer: EpsonPrinter, template: String) {
+    if (template.isEmpty()) {
+        // Fallback to default item display if no template provided
+        return
+    }
+    
+    // Handle alignment directives by processing line by line
+    // Split on both actual newlines and escaped newlines
+    val lines = template.split("\\n|\\\\n".toRegex())
+    var currentAlignment = Alignment.LEFT // Default alignment
+    
+    for (line in lines) {
+        var processedLine = line.trim()
+        if (processedLine.isEmpty()) continue
+        
+        // Check for alignment and feedLine directives at the start of the line
+        when {
+            processedLine.startsWith("{{align:left}}") -> {
+                currentAlignment = Alignment.LEFT
+                processedLine = processedLine.removePrefix("{{align:left}}")
+            }
+            processedLine.startsWith("{{align:center}}") -> {
+                currentAlignment = Alignment.CENTER
+                processedLine = processedLine.removePrefix("{{align:center}}")
+            }
+            processedLine.startsWith("{{align:right}}") -> {
+                currentAlignment = Alignment.RIGHT
+                processedLine = processedLine.removePrefix("{{align:right}}")
+            }
+            processedLine.startsWith("{{feedLine:") -> {
+                // Extract number of lines from {{feedLine:n}}
+                val startIndex = processedLine.indexOf("{{feedLine:") + 11
+                val endIndex = processedLine.indexOf("}}", startIndex)
+                if (endIndex > startIndex) {
+                    val numberStr = processedLine.substring(startIndex, endIndex)
+                    val lines = numberStr.toIntOrNull() ?: 1
+                    printer.addFeedLine(lines)
+                    processedLine = processedLine.removePrefix("{{feedLine:" + numberStr + "}}")
+                }
+            }
+            processedLine.startsWith("{{feedLine}}") -> {
+                printer.addFeedLine(1)
+                processedLine = processedLine.removePrefix("{{feedLine}}")
+            }
+        }
+        
+        // Set alignment and print the line content
+        if (processedLine.isNotEmpty()) {
+            printer.addTextAlign(currentAlignment)
+            printer.addText(processedLine)
+        }
+    }
+}
+
+fun printContentLines(printer: EpsonPrinter, content: String) {
+    // Handle newlines in content
+    val lines = content.split("\\\\n".toRegex())
+    for (line in lines) {
+        if (line.isNotEmpty()) {
+            printer.addText(line.trim())
+        }
+    }
+}
+`);
   const [endpoint, setEndpoint] = useState<string | null>(null);
   const [teamId, setTeamId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
